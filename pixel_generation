@@ -1,0 +1,175 @@
+`timescale 1ns / 1ps
+//////////////////////////////////////////////////////////////////////////////////
+// Company: 
+// Engineer: Nicholai Agdeppa & Ayleen Perez
+// 
+// Create Date: 04/15/2025 12:29:25 PM
+// Design Name: 
+// Module Name: pixel_generation
+// Project Name: 
+// Target Devices: 
+// Tool Versions: 
+// Description: 
+// 
+// Dependencies: 
+// 
+// Revision:
+// Revision 0.01 - File Created
+// Additional Comments:
+// 
+//////////////////////////////////////////////////////////////////////////////////
+
+
+module pixel_generation(
+    input clk,
+    input video_on,
+    input reset,
+    input left,
+    input right,
+    //future implementation vvvv
+    //input shoot,
+    input [9:0] x, y,
+    //ayleen input
+    input alien_on,
+    input [11:0] alien_rgb,
+    input game_running,
+    // ayleen end
+    output reg [11:0] rgb
+    );
+    
+    //60hz Refresh tick
+    wire refresh_tick;
+    assign refresh_tick = ((y == 481) && (x == 0)) ? 1 : 0; 
+    
+    //You need refresh ticks to allow smooth transitions or animations
+    //if you dont use refresh tick, it can make your player or updates to your screen happen too fast
+    //skipping what you want to display
+    
+    // maximum x, y values in display area
+    parameter X_MAX = 639;
+    parameter Y_MAX = 479;
+    
+    // RGB Color Values
+    parameter RED    = 12'h00F;
+    parameter GREEN  = 12'h0F0;
+    parameter BLUE   = 12'hF00;
+    parameter YELLOW = 12'h0FF;     // RED and GREEN
+    parameter WHITE  = 12'hFFF;    
+    parameter BLACK  = 12'h000;    
+
+    //Player paramaters
+    parameter PLAYER_SIZE = 32;
+    parameter X_START = 320;
+    parameter Y_START = 422;
+    
+    //Player Boundries:
+    parameter X_LEFT = 32;
+    parameter X_RIGHT = 608;
+    parameter Y_TOP = 68;
+    parameter Y_BOTTOM = 452;
+    
+    //player boundries signals
+    wire [9:0] x_plyr_L, x_plyr_R; //player horizontal boundaries
+    wire [9:0] y_plyr_t, y_plyr_b; //player vertical boundaries
+    reg [9:0] x_plyr_reg = X_START; //starting x position 
+    reg [9:0] y_plyr_reg = Y_START; //starting y positoin
+    reg [9:0] x_plyr_next; //the player buffer for the movement
+    
+    //rom boundary logic
+    assign x_plyr_L = x_plyr_reg;
+    assign x_plyr_R = x_plyr_L + PLAYER_SIZE - 1;
+    assign y_plyr_t = y_plyr_reg;
+    assign y_plyr_b = y_plyr_t + PLAYER_SIZE - 1;
+    
+    parameter PLYR_VELOCITY = 1; //how fast the player will be moving
+    
+    //Register control for the player
+    always @(posedge clk or posedge reset)
+        if(reset) begin
+            x_plyr_reg <= X_START;
+            //y_plyr_reg <= Y_START;
+        end
+        else begin
+            x_plyr_reg <= x_plyr_next;
+            //y_plyr_reg <= y_plyr_next;
+        end
+        
+     //Player Control
+    always @* begin
+         x_plyr_next = x_plyr_reg;       // no move
+         if (refresh_tick && game_running) begin  // only move when game is running
+             if (left && (x_plyr_L > PLYR_VELOCITY) && (x_plyr_L > (X_LEFT + PLYR_VELOCITY - 1)))
+                 x_plyr_next = x_plyr_reg - PLYR_VELOCITY;   // move left
+             else if (right && (x_plyr_R < (X_MAX - PLYR_VELOCITY)) && (x_plyr_R < (X_RIGHT - PLYR_VELOCITY)))
+                 x_plyr_next = x_plyr_reg + PLYR_VELOCITY;   // move right
+         end
+     end
+  
+     
+     //row and column wires for each rom
+     wire [4:0] row, col; // right and left movement
+     //wire [4:0] row2, col2; //right movement
+    
+    //assign rows and columns for the player
+    assign col = x  - x_plyr_L;
+    assign row = y  - y_plyr_t;
+    
+    //instantiate player roms
+    wire [11:0] rom_data;
+    Player_1_test_rom rom(.clk(clk), .row(row), .col(col), .color_data(rom_data));
+    
+    // Status signal for frog
+    wire player_on;
+    assign player_on = (x_plyr_L <= x) && (x <= x_plyr_R) &&
+                       (y_plyr_t <= y) && (y <= y_plyr_b);
+    
+    //ayleen removed alien logic
+
+    //TEST VGA POSITIONS AND CODE
+    
+    //Game Border Positions and Code
+    wire left_wall, right_wall, top_border, bottom_border, background;
+    
+    assign left_wall  = ((x >= 0) && (x < 32)  && (y >= 32) && (y < 452));
+    assign right_wall = ((x >= 608) && (x < 640)  && (y >= 32) && (y < 452));
+    assign bottom_border  = ((x >= 0)   && (x < 640)   &&  (y >= 452) && (y < 480));
+    assign top_border = ((x >= 0)  && (x < 640)  &&  (y >= 0) && (y < 36)); 
+    assign background = ((x >= 32) && (x < 608) && (y >= 36) && (y < 452));
+    
+
+    always @* begin
+        if (~video_on)
+            rgb = BLACK;
+    
+        // ? Priority 1: Draw player if it's on this pixel and the ROM pixel isn't black
+        else if (player_on && background && game_running)
+  // any non-zero bits in rom_data means visible
+            if (&rom_data)
+                rgb = BLACK;
+            else
+                rgb = rom_data;
+                
+        else if (alien_on && background && game_running)
+            if (&alien_rgb)
+                rgb = BLACK;
+            else
+                rgb = alien_rgb;
+    
+        // ? Priority 2: Walls and Borders
+        else if (left_wall || right_wall || bottom_border || top_border)
+            rgb = WHITE;
+    
+        // ?? Priority 3: General background
+        else if (background)
+            rgb = BLACK;  // Example color (green-ish), you can change this
+    
+        // ? Fallback: nothing else is here
+        else
+            rgb = BLACK;
+    end
+    
+       
+endmodule
+
+
+
