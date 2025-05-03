@@ -1,0 +1,148 @@
+`timescale 1ns / 1ps
+//////////////////////////////////////////////////////////////////////////////////
+// Company: 
+// Engineer: 
+// 
+// Create Date: 04/27/2025 09:34:40 PM
+// Design Name: 
+// Module Name: alien_controller
+// Project Name: 
+// Target Devices: 
+// Tool Versions: 
+// Description: 
+// 
+// Dependencies: 
+// 
+// Revision:
+// Revision 0.01 - File Created
+// Additional Comments:
+// 
+//////////////////////////////////////////////////////////////////////////////////
+
+
+module alien_controller(
+    input wire clk,
+    input wire reset,
+    input wire [10:0] pixel_x, pixel_y,   // VGA pixel position
+    input wire game_running,             // Game active (not paused or on title)
+    output reg alien_on,                 // Whether the current pixel overlaps an alien
+    output reg [11:0] alien_rgb          // Alien pixel RGB output
+);
+
+    //Parameters
+    //------------------
+    parameter N_ROWS = 3;
+    parameter N_COLS = 5;
+    parameter ALIEN_WIDTH = 11;
+    parameter ALIEN_HEIGHT = 8;
+    parameter X_START = 100;
+    parameter Y_START = 80;
+    parameter X_LEFT = 32; //borders
+    parameter X_RIGHT = 608; //borders
+    parameter X_GAP = 10;   // space between aliens horizontally
+    parameter Y_GAP = 12;   // space between aliens vertically
+    parameter ALIEN_VELOCITY = 5;
+
+    //State Variables
+    //--------------------
+    reg [10:0] x_offset, y_offset;  // top-left corner of alien block
+    reg dir;                        // 0 = right, 1 = left
+    reg alive [0:N_ROWS-1][0:N_COLS-1]; // 2D alive flags
+    
+    //Movement timing
+    reg [23:0] move_counter = 24'd5000000;
+    wire move_tick = (move_counter == 0);  
+    
+    //ROM interface Alien Sprite
+    reg [4:0] sprite_col;
+    reg [3:0] sprite_row;
+    wire [11:0] rom_color;      
+    
+    //Alien Sprite ROM
+    //---------------------
+    AlienOne_rom alien_rom_inst (
+        .clk(clk),
+        .row(sprite_row),
+        .col(sprite_col),
+        .color_data(rom_color)
+    );
+    
+    //Movement Logic
+    //-----------------------
+    integer r, c;
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
+            x_offset <= X_START;
+            y_offset <= Y_START;
+            dir <= 0;
+            move_counter <= 24'd5000000;
+
+            // Reset all aliens to alive
+            for (r = 0; r < N_ROWS; r = r + 1)
+                for (c = 0; c < N_COLS; c = c + 1)
+                    alive[r][c] <= 1;
+        end else if (game_running) begin
+            if (move_tick) begin
+                if (!dir) begin  // Moving right
+                    if (x_offset + BLOCK_WIDTH + 5 < X_RIGHT)
+                        x_offset <= x_offset + ALIEN_VELOCITY;
+                    else begin
+                        dir <= 1;
+                        y_offset <= y_offset + 16;
+                    end
+                end else begin  // Moving left
+                    if (x_offset > X_LEFT + 5)
+                        x_offset <= x_offset - ALIEN_VELOCITY;
+                    else begin
+                        dir <= 0;
+                        y_offset <= y_offset + 16;
+                    end
+                end
+                move_counter <= 24'd5000000;
+            end else begin
+                move_counter <= move_counter - 1;
+            end
+        end
+        // If paused or on title, do nothing
+    end    
+        
+    //Drawing Logic
+    //----------------------------
+    // Alien block dimensions
+    localparam BLOCK_WIDTH  = N_COLS * (ALIEN_WIDTH + X_GAP) - X_GAP;
+    localparam BLOCK_HEIGHT = N_ROWS * (ALIEN_HEIGHT + Y_GAP) - Y_GAP;
+    
+    integer alien_left, alien_top;
+    always @(*) begin
+        alien_on = 0;
+        alien_rgb = 12'h000;
+        sprite_col = 0;
+        sprite_row = 0;
+    
+        for (r = 0; r < N_ROWS; r = r + 1) begin
+            for (c = 0; c < N_COLS; c = c + 1) begin
+                if (alive[r][c]) begin
+                    alien_left = x_offset + c * (ALIEN_WIDTH + X_GAP);
+                    alien_top  = y_offset + r * (ALIEN_HEIGHT + Y_GAP);
+    
+                    if ((pixel_x >= alien_left) && (pixel_x < alien_left + ALIEN_WIDTH) &&
+                        (pixel_y >= alien_top)  && (pixel_y < alien_top + ALIEN_HEIGHT)) begin
+    
+                        sprite_col = pixel_x - alien_left;
+                        sprite_row = pixel_y - alien_top;
+    
+                        if (rom_color != 12'h000) begin
+                            alien_on = 1;
+                            alien_rgb = rom_color;
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+endmodule
+
+
+
+
