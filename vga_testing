@@ -1,0 +1,183 @@
+`timescale 1ns / 1ps
+//////////////////////////////////////////////////////////////////////////////////
+// Company: 
+// Engineer: Ayleen Perez & Nicholai Agdeppa
+// 
+// Create Date: 04/04/2025 05:29:19 PM
+// Design Name: 
+// Module Name: vga_testing
+// Project Name: 
+// Target Devices: 
+// Tool Versions: 
+// Description: 
+// 
+// Dependencies: 
+// 
+// Revision:
+// Revision 0.01 - File Created
+// Additional Comments:
+// 
+//////////////////////////////////////////////////////////////////////////////////
+
+
+module vga_testing(
+    input clk_100MHz,          // 100 MHz system clock from Nexys A7
+    input reset,               // active-high reset
+
+    input right, left,         // player movement buttons
+	//input shoot,
+    input [11:0] sw,           // switches: [0]=start, [1]=title screen select
+
+    output hsync, vsync,       // VGA sync signals
+	output [11:0] rgb      // 12 FPGA pins for RGB(4 per color)
+);
+
+	// Internal Signals
+	//--------------------------
+    wire w_video_on, w_p_tick;
+    wire [9:0] w_x, w_y;              // current pixel position
+    reg [11:0] rgb_reg;              // current pixel RGB value (registered)
+    wire [11:0] rgb_next;            // pixel RGB from game render;
+    
+    wire w_left, w_right;            // debounced button outputs
+    
+    //title screen
+    wire[4:0] title_rgb;
+    
+    // Game runs only if title screen is OFF and start is ON
+    wire game_running = ~sw[1] && sw[0];
+    
+    //alien
+    wire alien_on;
+    wire [11:0] alien_rgb;
+    
+    //pause symbol
+    wire[4:0] pause_rgb;
+    
+    //game over
+    wire[4:0] game_over_rgb;
+    
+    //win screen
+    reg [27:0] frame_count = 0;
+    wire [4:0] win_rgb;
+    
+    always @(posedge clk_100MHz) begin
+        frame_count <= frame_count + 1;
+    end
+
+    //Module Instantiations
+    //--------------------------------
+    
+    //Game Over screen
+    game_over_text game_over_inst (
+        .video_on(w_video_on),
+        .pixel_x(w_x),
+        .pixel_y(w_y),
+        .vga_rgb(game_over_rgb)
+    );
+    
+    //win screen
+    win_screen win_inst (
+        .video_on(w_video_on),
+        .pixel_x(w_x),
+        .pixel_y(w_y),
+        .frame_count(frame_count),
+        .vga_rgb(win_rgb)
+    );
+
+    
+    // VGA Controller
+    vga_testing_controller vc (
+        .clk_100MHz(clk_100MHz),
+        .reset(reset),
+        .video_on(w_video_on),
+        .hsync(hsync),
+        .vsync(vsync),
+        .p_tick(w_p_tick),
+        .x(w_x),
+        .y(w_y)
+    );
+
+    // Title Screen Renderer
+    title_rgb title_inst (
+        .video_on(w_video_on),
+        .pixel_x(w_x),
+        .pixel_y(w_y),
+        .vga_rgb(title_rgb)
+    );
+    
+    // Alien Controller
+    alien_controller alien_ctrl_inst (
+        .clk(clk_100MHz),
+        .reset(reset),
+        .pixel_x(w_x),
+        .pixel_y(w_y),
+        .alien_on(alien_on),
+        .alien_rgb(alien_rgb),
+        .game_running(game_running)
+    );
+    
+    // Game Image Pixel Generator (includes player, aliens, background)
+    pixel_generation pg (
+        .clk(clk_100MHz),
+        .reset(reset),
+        .left(w_left),
+        .right(w_right),
+        .video_on(w_video_on),
+        .x(w_x),
+        .y(w_y),
+        .alien_on(alien_on),
+        .alien_rgb(alien_rgb),
+        .rgb(rgb_next),
+        .game_running(game_running)
+    );
+    
+    //Pause Symbol Render
+    pause_symbol pause_inst (
+        .video_on(w_video_on),
+        .pixel_x(w_x),
+        .pixel_y(w_y),
+        .pause_active(~game_running),
+        .vga_rgb(pause_rgb)
+    );
+    
+    // Button Debouncing
+    btn_debounce dLeft (
+        .clk(clk_100MHz),
+        .btn_in(left),
+        .btn_out(w_left)
+    );
+    
+     btn_debounce dRight (
+        .clk(clk_100MHz),
+        .btn_in(right),
+        .btn_out(w_right)
+    );
+     
+    //RGB Mux: Title screen vs Game display
+    //-------------------------------------
+      
+      always @(posedge clk_100MHz) begin
+          if (w_p_tick) begin
+              if (sw[1]) begin
+                  rgb_reg <= {title_rgb[4:3], 2'b00, title_rgb[2:1], 2'b00, title_rgb[0], 3'b000};
+              end else if (sw[3] && win_rgb != 5'b00000) begin
+                  rgb_reg <= {win_rgb[4:3], 2'b00, win_rgb[2:1], 2'b00, win_rgb[0], 3'b000};
+              end else if (sw[2] && game_over_rgb != 5'b00000) begin
+                  rgb_reg <= {game_over_rgb[4:3], 2'b00, game_over_rgb[2:1], 2'b00, game_over_rgb[0], 3'b000};
+              end else if (~game_running && pause_rgb != 5'b00000) begin
+                  rgb_reg <= {pause_rgb[4:3], 2'b00, pause_rgb[2:1], 2'b00, pause_rgb[0], 3'b000};
+              end else begin
+                  rgb_reg <= rgb_next;
+              end
+          end
+      end
+
+
+    // Final output
+    assign rgb = rgb_reg;
+
+endmodule
+
+
+
